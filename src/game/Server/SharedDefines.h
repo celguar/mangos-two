@@ -3147,4 +3147,7 @@ enum TeleportLocation
     TELEPORT_LOCATION_BG_ENTRY_POINT = 1,
 };
 
+#define MANGOSBOT_TWO
+#define MANGOS
+
 #endif

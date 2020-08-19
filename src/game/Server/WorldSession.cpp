@@ -49,6 +49,9 @@
 #ifdef ENABLE_ELUNA
 #include "LuaEngine.h"
 #endif /*ENABLE_ELUNA*/
+#ifdef ENABLE_PLAYERBOTS
+#include "playerbot.h"
+#endif /*ENABLE_PLAYERBOTS*/
 
 // Warden
 #include "WardenWin.h"
@@ -158,6 +161,15 @@ char const* WorldSession::GetPlayerName() const
 /// Send a packet to the client
 void WorldSession::SendPacket(WorldPacket const* packet)
 {
+#ifdef ENABLE_PLAYERBOTS
+    if (GetPlayer()) {
+        if (GetPlayer()->GetPlayerbotAI())
+            GetPlayer()->GetPlayerbotAI()->HandleBotOutgoingPacket(*packet);
+        else if (GetPlayer()->GetPlayerbotMgr())
+            GetPlayer()->GetPlayerbotMgr()->HandleMasterOutgoingPacket(*packet);
+    }
+#endif
+
     if (!m_Socket)
     {
         return;
@@ -263,6 +275,12 @@ bool WorldSession::Update(PacketFilter& updater)
                     }
 
                     // lag can cause STATUS_LOGGEDIN opcodes to arrive after the player started a transfer
+
+#ifdef ENABLE_PLAYERBOTS
+                    if (_player && _player->GetPlayerbotMgr())
+                        _player->GetPlayerbotMgr()->HandleMasterIncomingPacket(*packet);
+#endif
+
                     break;
                 case STATUS_LOGGEDIN_OR_RECENTLY_LOGGEDOUT:
                     if (!_player && !m_playerRecentlyLogout)
@@ -341,6 +359,11 @@ bool WorldSession::Update(PacketFilter& updater)
         delete packet;
     }
 
+#ifdef ENABLE_PLAYERBOTS
+    if (GetPlayer() && GetPlayer()->GetPlayerbotMgr())
+        GetPlayer()->GetPlayerbotMgr()->UpdateSessions(0);
+#endif
+
     ///- Cleanup socket pointer if need
     if (m_Socket && m_Socket->IsClosed())
     {
@@ -374,6 +397,19 @@ bool WorldSession::Update(PacketFilter& updater)
     return true;
 }
 
+#ifdef ENABLE_PLAYERBOTS
+void WorldSession::HandleBotPackets()
+{
+    WorldPacket* packet;
+    while (_recvQueue.next(packet))
+    {
+        OpcodeHandler const& opHandle = opcodeTable[packet->GetOpcode()];
+        (this->*opHandle.handler)(*packet);
+        delete packet;
+    }
+}
+#endif
+
 /// %Log the player out
 void WorldSession::LogoutPlayer(bool Save)
 {
@@ -386,12 +422,22 @@ void WorldSession::LogoutPlayer(bool Save)
 
     if (_player)
     {
-        sLog.outChar("Account: %d (IP: %s) Logout Character:[%s] (guid: %u)", GetAccountId(), GetRemoteAddress().c_str(), _player->GetName() , _player->GetGUIDLow());
+#ifdef ENABLE_PLAYERBOTS
+        sLog.outChar("Account: %d (IP: %s) Logout Character:[%s] (guid: %u)", GetAccountId(), m_Socket ? GetRemoteAddress().c_str() : "bot", _player->GetName(), _player->GetGUIDLow());
+#else
+        sLog.outChar("Account: %d (IP: %s) Logout Character:[%s] (guid: %u)", GetAccountId(), GetRemoteAddress().c_str(), _player->GetName(), _player->GetGUIDLow());
+#endif
 
         if (ObjectGuid lootGuid = GetPlayer()->GetLootGuid())
         {
             DoLootRelease(lootGuid);
         }
+
+#ifdef ENABLE_PLAYERBOTS
+        if (_player->GetPlayerbotMgr())
+            _player->GetPlayerbotMgr()->LogoutAllBots();
+        sRandomPlayerbotMgr.OnPlayerLogout(_player);
+#endif
 
         ///- If the player just died before logging out, make him appear as a ghost
         // FIXME: logout must be delayed in case lost connection with client in time of combat
@@ -514,6 +560,7 @@ void WorldSession::LogoutPlayer(bool Save)
         ///- Leave all channels before player delete...
         _player->CleanupChannels();
 
+#ifndef ENABLE_PLAYERBOTS
         ///- If the player is in a group (or invited), remove him. If the group if then only 1 person, disband the group.
         _player->UninviteFromGroup();
 
@@ -523,6 +570,7 @@ void WorldSession::LogoutPlayer(bool Save)
         {
             _player->RemoveFromGroup();
         }
+#endif
 
         ///- Send update to group
         if (_player->GetGroup())
