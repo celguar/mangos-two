@@ -15171,7 +15171,12 @@ void Player::RewardQuest(Quest const* pQuest, uint32 reward, Object* questGiver,
             break;
     }
 
+    // don't start quest script during randomization
+#ifdef ENABLE_PLAYERBOTS
+    if (this != questGiver && !handled && pQuest->GetQuestCompleteScript() != 0)
+#else
     if (!handled && pQuest->GetQuestCompleteScript() != 0)
+#endif
     {
         GetMap()->ScriptsStart(DBS_ON_QUEST_END, pQuest->GetQuestCompleteScript(), questGiver, this, Map::SCRIPT_EXEC_PARAM_UNIQUE_BY_SOURCE);
     }
